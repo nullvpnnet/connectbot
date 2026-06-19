@@ -13,12 +13,12 @@ on:
           - google
           - both
       deploy:
-        description: 'Deploy to tablet via ADB?'
+        description: 'Deploy to tablet via ADB wireless?'
         required: true
         default: false
         type: boolean
       tablet_ip:
-        description: 'Tablet IP (for ADB wireless)'
+        description: 'Tablet IP for ADB wireless'
         required: false
         default: '192.168.1.111'
         type: string
@@ -31,21 +31,18 @@ jobs:
   build:
     runs-on: [self-hosted, android]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - run: echo "sdk.dir=/opt/android-sdk" > local.properties
 
-      - name: Setup local.properties
-        run: echo "sdk.dir=/opt/android-sdk" > local.properties
-
-      - name: Build OSS Debug APK
+      - name: Build OSS
         if: inputs.flavor == 'oss' || inputs.flavor == 'both'
         run: ./gradlew assembleOssDebug --no-daemon
 
-      - name: Build Google Debug APK
+      - name: Build Google
         if: inputs.flavor == 'google' || inputs.flavor == 'both'
         run: ./gradlew assembleGoogleDebug --no-daemon
 
-      - name: Upload OSS APK artifact
+      - name: Upload OSS APK
         if: inputs.flavor == 'oss' || inputs.flavor == 'both'
         uses: actions/upload-artifact@v4
         with:
@@ -53,7 +50,7 @@ jobs:
           path: app/build/outputs/apk/oss/debug/app-oss-debug.apk
           retention-days: 7
 
-      - name: Upload Google APK artifact
+      - name: Upload Google APK
         if: inputs.flavor == 'google' || inputs.flavor == 'both'
         uses: actions/upload-artifact@v4
         with:
@@ -61,28 +58,16 @@ jobs:
           path: app/build/outputs/apk/google/debug/app-google-debug.apk
           retention-days: 7
 
-      - name: Deploy OSS to tablet via ADB
-        if: (inputs.flavor == 'oss' || inputs.flavor == 'both') && inputs.deploy
+      - name: Deploy to tablet
+        if: inputs.deploy
         run: |
           ADB=/opt/android-sdk/platform-tools/adb
-          TABLET="${{ inputs.tablet_ip }}:5555"
-          echo "Connecting to tablet at $TABLET..."
-          $ADB connect $TABLET
-          $ADB -s $TABLET install -r app/build/outputs/apk/oss/debug/app-oss-debug.apk
-          echo "OSS APK deployed!"
+          $ADB connect ${{ inputs.tablet_ip }}:5555
+          for apk in app/build/outputs/apk/*/debug/*.apk; do
+            $ADB -s ${{ inputs.tablet_ip }}:5555 install -r "$apk"
+          done
 
-      - name: Deploy Google to tablet via ADB
-        if: (inputs.flavor == 'google' || inputs.flavor == 'both') && inputs.deploy
-        run: |
-          ADB=/opt/android-sdk/platform-tools/adb
-          TABLET="${{ inputs.tablet_ip }}:5555"
-          echo "Connecting to tablet at $TABLET..."
-          $ADB connect $TABLET
-          $ADB -s $TABLET install -r app/build/outputs/apk/google/debug/app-google-debug.apk
-          echo "Google APK deployed!"
-
-      - name: Copy APKs to shared location
+      - name: Copy to releases
         run: |
           mkdir -p /opt/nullvpnnet/apk-releases
           cp -v app/build/outputs/apk/*/debug/*.apk /opt/nullvpnnet/apk-releases/
-          echo "APKs copied to /opt/nullvpnnet/apk-releases/"
