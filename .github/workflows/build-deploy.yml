@@ -1,4 +1,4 @@
-name: Build & Deploy ConnectBot APK
+name: Build & Deploy ConnectBot
 
 on:
   workflow_dispatch:
@@ -13,23 +13,21 @@ on:
           - google
           - both
       deploy:
-        description: 'Deploy to tablet via ADB wireless?'
+        description: 'Deploy to tablet via ADB tunnel?'
         required: true
         default: false
         type: boolean
-      tablet_ip:
-        description: 'Tablet IP for ADB wireless'
-        required: false
-        default: '192.168.1.111'
-        type: string
 
 env:
   ANDROID_HOME: /opt/android-sdk
   JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+  ADB_HOST: 127.0.0.1
+  ADB_PORT: 5038
 
 jobs:
   build:
     runs-on: [self-hosted, android]
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - run: echo "sdk.dir=/opt/android-sdk" > local.properties
@@ -41,6 +39,19 @@ jobs:
       - name: Build Google
         if: inputs.flavor == 'google' || inputs.flavor == 'both'
         run: ./gradlew assembleGoogleDebug --no-daemon
+
+      - name: List devices
+        run: adb -H ${{ env.ADB_HOST }} -P ${{ env.ADB_PORT }} devices -l
+
+      - name: Deploy OSS to tablet
+        if: (inputs.flavor == 'oss' || inputs.flavor == 'both') && inputs.deploy
+        run: |
+          adb -H ${{ env.ADB_HOST }} -P ${{ env.ADB_PORT }} install -r             app/build/outputs/apk/oss/debug/app-oss-debug.apk
+
+      - name: Deploy Google to tablet
+        if: (inputs.flavor == 'google' || inputs.flavor == 'both') && inputs.deploy
+        run: |
+          adb -H ${{ env.ADB_HOST }} -P ${{ env.ADB_PORT }} install -r             app/build/outputs/apk/google/debug/app-google-debug.apk
 
       - name: Upload OSS APK
         if: inputs.flavor == 'oss' || inputs.flavor == 'both'
@@ -58,16 +69,7 @@ jobs:
           path: app/build/outputs/apk/google/debug/app-google-debug.apk
           retention-days: 7
 
-      - name: Deploy to tablet
-        if: inputs.deploy
-        run: |
-          ADB=/opt/android-sdk/platform-tools/adb
-          $ADB connect ${{ inputs.tablet_ip }}:5555
-          for apk in app/build/outputs/apk/*/debug/*.apk; do
-            $ADB -s ${{ inputs.tablet_ip }}:5555 install -r "$apk"
-          done
-
-      - name: Copy to releases
+      - name: Copy to releases dir
         run: |
           mkdir -p /opt/nullvpnnet/apk-releases
           cp -v app/build/outputs/apk/*/debug/*.apk /opt/nullvpnnet/apk-releases/
